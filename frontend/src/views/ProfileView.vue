@@ -1482,11 +1482,14 @@ const closeSkillDropdown = () => {
 }
 
 const selectSkillFromInput = () => {
-  const query = skillInput.value.trim().toLowerCase()
+  const query = skillInput.value.trim()
   if (!query) return
-  const match = skillSuggestions.value.find((skill) => skill?.name?.toLowerCase() === query)
+  const lowerQuery = query.toLowerCase()
+  const match = skillSuggestions.value.find((skill) => skill?.name?.toLowerCase() === lowerQuery)
   if (match) {
     selectSkill(match.name)
+  } else {
+    selectSkill(query)
   }
 }
 
