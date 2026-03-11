@@ -299,6 +299,34 @@
               </div>
             </div>
           </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Municipality</label>
+            <div class="relative">
+              <input
+                v-model="form.municipality"
+                type="text"
+                placeholder="Search municipality"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                @focus="municipalityDropdownOpen = true"
+                @input="onMunicipalityInput"
+                @blur="closeMunicipalityDropdown"
+              />
+              <div v-if="municipalityDropdownOpen" class="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                <button
+                  v-for="mun in filteredMunicipalityOptions"
+                  :key="mun"
+                  type="button"
+                  class="w-full text-left px-3 py-2 hover:bg-gray-50"
+                  @mousedown.prevent="selectMunicipality(mun)"
+                >
+                  <div class="text-sm text-gray-900">{{ mun }}</div>
+                </button>
+                <div v-if="filteredMunicipalityOptions.length === 0" class="px-3 py-2 text-sm text-gray-500">
+                  No matching municipalities.
+                </div>
+              </div>
+            </div>
+          </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-2">Country</label>
               <div class="relative">
@@ -838,6 +866,7 @@ const authStore = useAuthStore()
 const saving = ref(false)
 const skillInput = ref('')
 const skillDropdownOpen = ref(false)
+const municipalityDropdownOpen = ref(false)
 const industryInput = ref('')
 const industryDropdownOpen = ref(false)
 const countryDropdownOpen = ref(false)
@@ -906,6 +935,7 @@ const form = ref({
   current_job_title: '',
   industry: '',
   city: '',
+  municipality: '',
   country: '',
   employment_status: '',
   employment_sector: '',
@@ -1104,6 +1134,72 @@ const closeCityDropdown = () => {
     cityDropdownOpen.value = false
   }, 150)
 }
+
+const staticMunicipalityOptions = [
+  // Laguna
+  'Alaminos','Bay','Biñan','Cabuyao','Calauan','Cavinti','Famy','Kalayaan','Liliw',
+  'Los Baños','Luisiana','Lumban','Mabitac','Magdalena','Majayjay','Nagcarlan',
+  'Paete','Pagsanjan','Pakil','Pangil','Pila','Rizal','San Pablo','San Pedro',
+  'Santa Cruz','Santa Maria','Santa Rosa','Siniloan','Victoria',
+  // Batangas
+  'Agoncillo','Alitagtag','Balayan','Balete','Batangas City','Bauan','Calaca',
+  'Calatagan','Cuenca','Ibaan','Laurel','Lemery','Lian','Lobo','Mabini','Malvar',
+  'Mataas na Kahoy','Nasugbu','Padre Garcia','Rosario','San Jose','San Juan',
+  'San Luis','San Nicolas','San Pascual','Santa Teresita','Santo Tomas','Taal',
+  'Talisay','Taysan','Tingloy','Tuy',
+  // Quezon Province
+  'Agdangan','Alabat','Atimonan','Buenavista','Burdeos','Calauag','Candelaria',
+  'Catanauan','Dolores','General Luna','General Nakar','Guinayangan','Gumaca',
+  'Infanta','Jomalig','Lopez','Lucban','Lucena City','Macalelon','Mauban',
+  'Mulanay','Padre Burgos','Pagbilao','Panukulan','Patnanungan','Perez',
+  'Pitogo','Plaridel','Polillo','Quezon','Real','Sampaloc','San Andres',
+  'San Antonio','San Francisco','San Narciso','Sariaya','Tagkawayan','Tayabas',
+  'Tiaong','Unisan',
+  // Cavite
+  'Alfonso','Amadeo','Bacoor','Carmona','Cavite City','Dasmariñas','General Emilio Aguinaldo',
+  'General Mariano Alvarez','General Trias','Imus','Indang','Kawit','Magallanes',
+  'Maragondon','Mendez','Naic','Noveleta','Rosario','Silang','Tagaytay','Tanza',
+  'Ternate','Trece Martires',
+  // Rizal
+  'Angono','Antipolo','Baras','Binangonan','Cainta','Cardona','Jala-Jala',
+  'Morong','Pililla','Rodriguez','San Mateo','Tanay','Taytay','Teresa',
+  // Metro Manila cities as municipalities
+  'Caloocan','Las Piñas','Makati','Malabon','Mandaluyong','Manila','Marikina',
+  'Muntinlupa','Navotas','Parañaque','Pasay','Pasig','Pateros','Quezon City',
+  'San Juan','Taguig','Valenzuela',
+  // Cebu
+  'Alcantara','Alcoy','Alegria','Aloguinsan','Argao','Asturias','Badian','Balamban',
+  'Bantayan','Barili','Bogo','Boljoon','Borbon','Carmen','Catmon','Compostela',
+  'Consolacion','Cordova','Daanbantayan','Dalaguete','Danao','Dumanjug','Ginatilan',
+  'Lapu-Lapu City','Liloan','Madridejos','Malabuyoc','Mandaue','Medellin','Minglanilla',
+  'Moalboal','Naga','Oslob','Pilar','Pinamungajan','Poro','Ronda','Samboan',
+  'San Fernando','San Francisco','San Remigio','Santa Fe','Santander','Sibonga',
+  'Sogod','Tabogon','Tabuelan','Talisay','Toledo','Tuburan','Tudela',
+  // Davao Region
+  'Baguio City (Benguet)','Bansalan','Carmen','Davao City','Digos','Don Marcelino',
+  'Hagonoy','Jose Abad Santos','Kiblawan','Magsaysay','Malalag','Malita',
+  'Matanao','Mati','Padada','Santa Cruz','Sta. Maria','Sulop',
+]
+
+const municipalitySearchTerm = computed(() => (form.value.municipality || '').toLowerCase().trim())
+const filteredMunicipalityOptions = computed(() => {
+  const options = staticMunicipalityOptions
+  if (!municipalitySearchTerm.value) return options
+  return options.filter((option) => option.toLowerCase().includes(municipalitySearchTerm.value))
+})
+
+const onMunicipalityInput = () => {
+  municipalityDropdownOpen.value = true
+}
+const selectMunicipality = (mun) => {
+  form.value.municipality = mun
+  municipalityDropdownOpen.value = false
+}
+const closeMunicipalityDropdown = () => {
+  setTimeout(() => {
+    municipalityDropdownOpen.value = false
+  }, 150)
+}
 const isLcbaSchool = (name) => {
   if (!name) return false
   const n = String(name).trim().toLowerCase()
@@ -1154,6 +1250,7 @@ const loadProfile = async () => {
         current_job_title: me.current_job_title || '',
         industry: me.industry || '',
         city: me.city || '',
+        municipality: me.municipality || '',
         country: me.country || '',
         employment_status: me.employment_status || '',
         employment_sector: me.employment_sector || '',

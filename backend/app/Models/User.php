@@ -41,6 +41,7 @@ class User extends Authenticatable
         // Location
         'location',
         'city',
+        'municipality',
         'country',
         // Career
         'employment_status',

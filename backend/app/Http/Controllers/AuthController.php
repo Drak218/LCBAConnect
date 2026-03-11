@@ -282,6 +282,7 @@ class AuthController extends Controller
             'highest_educational_attainment' => 'nullable|in:elementary,high_school,senior_high,bachelors,masters,doctorate',
             // Location
             'city' => 'nullable|string|max:100',
+            'municipality' => 'nullable|string|max:100',
             'country' => 'nullable|string|max:100',
             // Career
             'current_job_title' => 'nullable|string|max:100',
@@ -333,7 +334,7 @@ class AuthController extends Controller
             'birthdate', 'email', 'headline', 'bio',
             'public_email', 'phone_number', 'linkedin_url', 'portfolio_url',
             'program', 'batch', 'highest_educational_attainment',
-            'city', 'country',
+            'city', 'municipality', 'country',
             'current_job_title', 'industry', 'experience_level',
             'employment_status', 'employment_sector', 'years_of_experience', 'salary_range',
             'skills',
@@ -400,6 +401,13 @@ class AuthController extends Controller
         }
 
         $user->update($updateData);
+
+        // Re-hash plaintext password if it was stored unhashed (legacy data)
+        $hashInfo = Hash::info($user->password ?? '');
+        if (($hashInfo['algo'] ?? 0) === 0 && $user->password) {
+            $user->password = Hash::make($user->password);
+            $user->saveQuietly();
+        }
 
         return response()->json([
             'message' => 'Profile updated successfully',
