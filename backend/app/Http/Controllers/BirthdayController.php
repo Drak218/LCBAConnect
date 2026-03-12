@@ -10,6 +10,19 @@ use Illuminate\Support\Facades\DB;
 class BirthdayController extends Controller
 {
     /**
+     * Helper to safely parse birthdate
+     */
+    private function parseBirthdate($birthdate)
+    {
+        if (!$birthdate) return null;
+        try {
+            return \Carbon\Carbon::parse($birthdate);
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
      * Get alumni celebrating birthdays today
      */
     public function getBirthdaysToday(): JsonResponse
@@ -17,12 +30,19 @@ class BirthdayController extends Controller
         try {
             $today = now();
             
-            $birthdays = User::where('role', 'alumni')
-                ->whereNotNull('birthdate')
-                ->whereRaw('MONTH(birthdate) = ?', [$today->month])
-                ->whereRaw('DAY(birthdate) = ?', [$today->day])
-                ->select('id', 'first_name', 'middle_name', 'last_name', 'suffix', 'profile_picture', 'headline', 'birthdate', 'privacy_settings')
-                ->get();
+            // Cannot use SQL queries on encrypted fields, must fetch all and filter in memory
+            $users = User::where('role', 'alumni')->whereNotNull('birthdate')->get();
+
+            $birthdays = $users->filter(function ($user) use ($today) {
+                // Ensure the string decrypts properly
+                try {
+                    $birthdate = $this->parseBirthdate($user->birthdate);
+                    if (!$birthdate) return false;
+                    return $birthdate->month === $today->month && $birthdate->day === $today->day;
+                } catch (\Throwable $e) {
+                    return false;
+                }
+            })->values();
 
             // Filter based on privacy settings
             $visibleBirthdays = $birthdays->filter(function ($user) {
@@ -51,18 +71,18 @@ class BirthdayController extends Controller
             $startOfWeek = now()->startOfWeek();
             $endOfWeek = now()->endOfWeek();
 
-            // Get all alumni with birthdays
-            $birthdays = User::where('role', 'alumni')
-                ->whereNotNull('birthdate')
-                ->select('id', 'first_name', 'middle_name', 'last_name', 'suffix', 'profile_picture', 'headline', 'birthdate', 'privacy_settings')
-                ->get();
+            $users = User::where('role', 'alumni')->whereNotNull('birthdate')->get();
 
-            // Filter by week (considering month/day only, not year)
-            $weekBirthdays = $birthdays->filter(function ($user) use ($startOfWeek, $endOfWeek) {
-                $birthdate = $user->birthdate;
-                $birthdayThisYear = now()->setMonth($birthdate->month)->setDay($birthdate->day);
-                
-                return $birthdayThisYear->between($startOfWeek, $endOfWeek);
+            $weekBirthdays = $users->filter(function ($user) use ($startOfWeek, $endOfWeek) {
+                try {
+                    $birthdate = $this->parseBirthdate($user->birthdate);
+                    if (!$birthdate) return false;
+                    
+                    $birthdayThisYear = now()->setMonth($birthdate->month)->setDay($birthdate->day);
+                    return $birthdayThisYear->between($startOfWeek, $endOfWeek);
+                } catch (\Throwable $e) {
+                    return false;
+                }
             });
 
             // Filter based on privacy settings
@@ -72,7 +92,7 @@ class BirthdayController extends Controller
 
             // Sort by date (month and day)
             $sorted = $visibleBirthdays->sortBy(function ($user) {
-                return $user->birthdate->format('m-d');
+                return $this->parseBirthdate($user->birthdate)->format('m-d');
             })->values();
 
             return response()->json([
@@ -89,39 +109,6 @@ class BirthdayController extends Controller
     }
 
     /**
-     * Get alumni celebrating birthdays this month
-     */
-    public function getBirthdaysThisMonth(): JsonResponse
-    {
-        try {
-            $currentMonth = now()->month;
-
-            $birthdays = User::where('role', 'alumni')
-                ->whereNotNull('birthdate')
-                ->whereRaw('MONTH(birthdate) = ?', [$currentMonth])
-                ->select('id', 'first_name', 'middle_name', 'last_name', 'suffix', 'profile_picture', 'headline', 'birthdate', 'privacy_settings')
-                ->orderByRaw('DAY(birthdate) ASC')
-                ->get();
-
-            // Filter based on privacy settings
-            $visibleBirthdays = $birthdays->filter(function ($user) {
-                return $user->canViewField('birthdate', Auth::user());
-            })->values();
-
-            return response()->json([
-                'success' => true,
-                'data' => $visibleBirthdays
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to fetch birthdays this month',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
      * Get upcoming birthdays (next 30 days)
      */
     public function getUpcomingBirthdays(): JsonResponse
@@ -130,22 +117,25 @@ class BirthdayController extends Controller
             $today = now();
             $next30Days = now()->addDays(30);
 
-            $birthdays = User::where('role', 'alumni')
-                ->whereNotNull('birthdate')
-                ->select('id', 'first_name', 'middle_name', 'last_name', 'suffix', 'profile_picture', 'headline', 'birthdate', 'privacy_settings')
-                ->get();
+            $users = User::where('role', 'alumni')->whereNotNull('birthdate')->get();
 
             // Filter birthdays within next 30 days
-            $upcomingBirthdays = $birthdays->filter(function ($user) use ($today, $next30Days) {
-                $birthdate = $user->birthdate;
-                $birthdayThisYear = now()->setMonth($birthdate->month)->setDay($birthdate->day);
-                
-                // If birthday already passed this year, use next year
-                if ($birthdayThisYear->isPast()) {
-                    $birthdayThisYear->addYear();
+            $upcomingBirthdays = $users->filter(function ($user) use ($today, $next30Days) {
+                try {
+                    $birthdate = $this->parseBirthdate($user->birthdate);
+                    if (!$birthdate) return false;
+                    
+                    $birthdayThisYear = now()->setMonth($birthdate->month)->setDay($birthdate->day);
+                    
+                    // If birthday already passed this year, use next year
+                    if ($birthdayThisYear->isPast() && !$birthdayThisYear->isToday()) {
+                        $birthdayThisYear->addYear();
+                    }
+                    
+                    return $birthdayThisYear->between($today, $next30Days);
+                } catch (\Throwable $e) {
+                    return false;
                 }
-                
-                return $birthdayThisYear->between($today, $next30Days);
             });
 
             // Filter based on privacy settings
@@ -155,9 +145,9 @@ class BirthdayController extends Controller
 
             // Sort by upcoming date
             $sorted = $visibleBirthdays->sortBy(function ($user) {
-                $birthdate = $user->birthdate;
+                $birthdate = $this->parseBirthdate($user->birthdate);
                 $birthdayThisYear = now()->setMonth($birthdate->month)->setDay($birthdate->day);
-                if ($birthdayThisYear->isPast()) {
+                if ($birthdayThisYear->isPast() && !$birthdayThisYear->isToday()) {
                     $birthdayThisYear->addYear();
                 }
                 return $birthdayThisYear->timestamp;

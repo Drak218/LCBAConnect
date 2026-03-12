@@ -81,8 +81,8 @@ class User extends Authenticatable
             'first_login_at' => 'datetime',
             'guidelines_accepted_at' => 'datetime',
             'years_of_experience' => 'integer',
-            'skills' => 'array',
-            'career_interests' => 'array',
+            'skills' => 'encrypted:array',
+            'career_interests' => 'encrypted:array',
             'work_setup_preferences' => 'array',
             'employment_type_preferences' => 'array',
             'industries_of_interest' => 'array',
@@ -91,6 +91,23 @@ class User extends Authenticatable
             'is_active' => 'boolean',
             'phone_number' => 'encrypted',
             'salary_range' => 'encrypted',
+
+            // New encrypted fields
+            'first_name' => 'encrypted',
+            'last_name' => 'encrypted',
+            'middle_name' => 'encrypted',
+            'suffix' => 'encrypted',
+            'bio' => 'encrypted',
+            'city' => 'encrypted',
+            'municipality' => 'encrypted',
+            'country' => 'encrypted',
+            'linkedin_url' => 'encrypted',
+            'portfolio_url' => 'encrypted',
+            'program' => 'encrypted',
+            'batch' => 'encrypted',
+            'highest_educational_attainment' => 'encrypted',
+            'experience_level' => 'encrypted',
+            'industry' => 'encrypted',
         ];
     }
 

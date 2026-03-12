@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 namespace App\Http\Controllers;
 
@@ -38,53 +38,36 @@ class UserController extends Controller
             $hasVerificationStatusColumn = Schema::hasColumn('users', 'lcba_verification_status');
             $hasEmployeeFlagColumn = Schema::hasColumn('users', 'is_lcba_employee_faculty');
             $buildUsersQuery = function () use ($request) {
-                // Fetch ALL users of the requested role (or non-mentors) into memory first.
-                // We MUST do this because fields like first_name, program, etc. are now encrypted
-                // and cannot be searched or filtered directly in the SQL query.
-                $query = User::query()->where('role', '!=', 'mentor');
-                
+                $query = User::query()
+                    ->where('role', '!=', 'mentor');
+
+                // Search filter
+                if ($request->has('search') && $request->search) {
+                    $search = $request->search;
+                    $query->where(function($q) use ($search) {
+                        $q->where('first_name', 'like', "%{$search}%")
+                          ->orWhere('last_name', 'like', "%{$search}%")
+                          ->orWhere('email', 'like', "%{$search}%")
+                          ->orWhere('headline', 'like', "%{$search}%");
+                    });
+                }
+
+                // Role filter
                 if ($request->has('role') && $request->role) {
                     $query->where('role', $request->role);
                 }
 
-                $users = $query->get();
-
-                // Apply Search and Filters in memory using Laravel Collections
-                if ($request->has('search') || $request->has('program') || $request->has('batch')) {
-                    $search = $request->has('search') ? strtolower($request->search) : null;
-                    $program = $request->has('program') ? $request->program : null;
-                    $batch = $request->has('batch') ? $request->batch : null;
-
-                    $users = $users->filter(function ($user) use ($search, $program, $batch) {
-                        $matchSearch = true;
-                        if ($search) {
-                            $firstName = strtolower($user->first_name ?? '');
-                            $lastName = strtolower($user->last_name ?? '');
-                            $email = strtolower($user->email ?? '');
-                            $headline = strtolower($user->headline ?? '');
-                            
-                            $matchSearch = str_contains($firstName, $search) || 
-                                           str_contains($lastName, $search) || 
-                                           str_contains($email, $search) || 
-                                           str_contains($headline, $search);
-                        }
-
-                        $matchProgram = true;
-                        if ($program) {
-                            $matchProgram = ($user->program === $program);
-                        }
-
-                        $matchBatch = true;
-                        if ($batch) {
-                            $matchBatch = ($user->batch === $batch);
-                        }
-
-                        return $matchSearch && $matchProgram && $matchBatch;
-                    });
+                // Program filter
+                if ($request->has('program') && $request->program) {
+                    $query->where('program', $request->program);
                 }
 
-                // Reset keys since filter generates a non-sequential array
-                return $users->values();
+                // Batch filter
+                if ($request->has('batch') && $request->batch) {
+                    $query->where('batch', $request->batch);
+                }
+
+                return $query->get();
             };
 
             // Check cache first (15 minute cache)
@@ -154,36 +137,21 @@ class UserController extends Controller
                 $users = $users->concat($legacyAlumni)->values();
             }
 
-            // Apply limit and exclude if requested
-            if ($request->has('exclude')) {
-                $excludeId = $request->exclude;
-                $users = $users->filter(fn($u) => $u->id != $excludeId)->values();
-            }
-
-            $usersArray = $users->filter(function ($user) {
-                // Gracefully skip any user that throws a decryption error on ANY field
-                try {
-                    if ($user instanceof \App\Models\User) {
-                        // Calling toArray() forces Eloquent to cast all attributes.
-                        // If any encrypted field contains plaintext, this will throw DecryptException.
-                        $user->toArray();
-                    }
-                    return true;
-                } catch (\Throwable $e) {
-                    return false;
-                }
-            })->values();
-
-            if ($request->has('limit')) {
-                $limit = (int) $request->limit;
-                if ($limit > 0) {
-                    $usersArray = $usersArray->take($limit)->values();
-                }
-            }
-
             return response()->json([
                 'success' => true,
-                'data' => $usersArray
+                'data' => $users->filter(function ($user) {
+                    // Gracefully skip any user that throws a decryption error
+                    try {
+                        // Access encrypted fields to trigger decryption ΓÇö if invalid, skip
+                        if ($user instanceof \App\Models\User) {
+                            $_ = $user->phone_number;
+                            $_ = $user->salary_range;
+                        }
+                        return true;
+                    } catch (\Throwable $e) {
+                        return false;
+                    }
+                })->values()
             ]);
         } catch (\Exception $e) {
             if (!($request->has('role') && $request->role && $request->role !== 'alumni') && Schema::hasTable('alumni')) {
@@ -350,17 +318,37 @@ class UserController extends Controller
     public function getFilterOptions(): JsonResponse
     {
         try {
-            $users = collect();
-            try {
-                $users = User::where('role', 'alumni')->get();
-            } catch (\Exception $e) {
-                // Ignore query error, fallback handles legacy
-            }
+            $cities = User::where('role', 'alumni')
+                ->whereNotNull('city')
+                ->distinct()
+                ->pluck('city')
+                ->filter()
+                ->sort()
+                ->values();
 
-            $cities = $users->pluck('city')->filter()->unique()->sort()->values();
-            $industries = $users->pluck('industry')->filter()->unique()->sort()->values();
-            $programs = $users->pluck('program')->filter()->unique()->sort()->values();
-            $batches = $users->pluck('batch')->filter()->unique()->sort()->values();
+            $industries = User::where('role', 'alumni')
+                ->whereNotNull('industry')
+                ->distinct()
+                ->pluck('industry')
+                ->filter()
+                ->sort()
+                ->values();
+
+            $programs = User::where('role', 'alumni')
+                ->whereNotNull('program')
+                ->distinct()
+                ->pluck('program')
+                ->filter()
+                ->sort()
+                ->values();
+
+            $batches = User::where('role', 'alumni')
+                ->whereNotNull('batch')
+                ->distinct()
+                ->pluck('batch')
+                ->filter()
+                ->sort()
+                ->values();
 
             if ($cities->isEmpty() && $industries->isEmpty() && $programs->isEmpty() && $batches->isEmpty() && Schema::hasTable('alumni')) {
                 $cities = collect();

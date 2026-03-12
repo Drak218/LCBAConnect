@@ -54,7 +54,8 @@ watch(
     if (isAuthenticated) {
       await authStore.fetchPendingWarning()
     }
-  }
+  },
+  { immediate: true }
 )
 
 const acknowledgeWarning = async () => {
