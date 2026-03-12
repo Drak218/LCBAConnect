@@ -133,13 +133,24 @@ class JobPostController extends Controller
 
             $job = JobPost::create([
                 'posted_by_admin' => $isAdmin,
-                'user_id' => Auth::id(),
-                'status' => $isAdmin ? 'approved' : 'pending',
+                'user_id'         => Auth::id(),
+                'status'          => $isAdmin ? 'approved' : 'pending',
                 ...$validated
             ]);
 
             // Load poster relationship
             $job->load('poster:id,first_name,last_name,middle_name');
+
+            // Audit log
+            AdminLog::create([
+                'user_id'    => Auth::id(),
+                'action'     => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) . ' posted job "' . $job->title . '"' . ($job->company_name ? ' at ' . $job->company_name : '') . ($isAdmin ? '' : ' (pending approval)'),
+                'model_type' => 'JobPost',
+                'model_id'   => $job->job_id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode(['action_type' => 'create_job_post', 'title' => $job->title, 'status' => $job->status]),
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -324,8 +335,10 @@ class JobPostController extends Controller
         if (!Schema::hasTable('admin_logs')) {
             return;
         }
-        $adminName = $admin ? trim(($admin->full_name ?? trim(($admin->first_name ?? '') . ' ' . ($admin->last_name ?? '')))) : '';
-        $logMessage = ($adminName !== '' ? 'Admin ' . $adminName : 'Admin') . ' performed ' . $actionLabel . ' on ' . $entityId . ' directly from the feed';
+        $adminName = $admin ? trim(($admin->full_name ?? trim(($admin->first_name ?? '') . ' ' . ($admin->last_name ?? '')))) : 'Admin';
+        $resourceTitle = $details['title'] ?? $details['job_title'] ?? null;
+        $resourceLabel = $resourceTitle ? '"' . $resourceTitle . '"' : 'resource #' . $entityId;
+        $logMessage = trim($adminName) . ' performed ' . $actionLabel . ' on ' . strtolower($modelType) . ' ' . $resourceLabel;
         $logPayload = [];
         if (Schema::hasColumn('admin_logs', 'user_id')) $logPayload['user_id'] = Auth::id();
         if (Schema::hasColumn('admin_logs', 'action')) $logPayload['action'] = $logMessage;

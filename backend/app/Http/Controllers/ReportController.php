@@ -296,8 +296,22 @@ class ReportController extends Controller
                 'admin_notes' => $actionLabel
             ]);
 
-            $adminName = $admin ? trim(($admin->full_name ?? trim(($admin->first_name ?? '') . ' ' . ($admin->last_name ?? '')))) : '';
-            $logMessage = ($adminName !== '' ? 'Admin ' . $adminName : 'Admin') . ' resolved Report #' . $report->id . ' via ' . $actionLabel;
+            $adminName = $admin ? trim(($admin->full_name ?? trim(($admin->first_name ?? '') . ' ' . ($admin->last_name ?? '')))) : 'Admin';
+            
+            $reporter = User::find($report->reporter_user_id);
+            $reporterName = $reporter ? trim(($reporter->first_name ?? '') . ' ' . ($reporter->last_name ?? '')) : 'Unknown User';
+            $targetName = 'Unknown Entity';
+            if ($targetUser) {
+                $targetName = trim(($targetUser->first_name ?? '') . ' ' . ($targetUser->last_name ?? ''));
+                if ($report->reported_entity_type !== 'user') $targetName .= ' (' . str_replace('_', ' ', $report->reported_entity_type) . ')';
+            } elseif ($report->reported_entity_type === 'job_post' && $reportedEntity instanceof JobPost) {
+                $targetName = 'Job Post "' . $reportedEntity->title . '"';
+            } elseif ($report->reported_entity_type === 'event' && $reportedEntity instanceof Event) {
+                $targetName = 'Event "' . $reportedEntity->title . '"';
+            }
+
+            $logMessage = $adminName . ' resolved report #' . $report->id . ' (' . $reporterName . ' reported ' . $targetName . ') via ' . $actionLabel;
+            
             if (Schema::hasTable('admin_logs')) {
                 $logPayload = [];
                 if (Schema::hasColumn('admin_logs', 'user_id')) $logPayload['user_id'] = Auth::id();
@@ -309,7 +323,8 @@ class ReportController extends Controller
                         'action' => $action,
                         'reported_entity_type' => $report->reported_entity_type,
                         'reported_entity_id' => $report->reported_entity_id,
-                        'target_user_id' => $targetUser?->id
+                        'target_user_id' => $targetUser?->id,
+                        'reporter_user_id' => $report->reporter_user_id
                     ]);
                 }
                 if (Schema::hasColumn('admin_logs', 'created_at')) $logPayload['created_at'] = now();

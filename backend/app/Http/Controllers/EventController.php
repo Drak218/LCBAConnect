@@ -130,8 +130,13 @@ class EventController extends Controller
                 ...$validated
             ]);
             AdminLog::create([
-                'user_id' => Auth::id(),
-                'action' => 'create_event',
+                'user_id'    => Auth::id(),
+                'action'     => trim((Auth::user()->first_name ?? '') . ' ' . (Auth::user()->last_name ?? '')) . ' created event "' . $event->title . '"',
+                'model_type' => 'Event',
+                'model_id'   => $event->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode(['action_type' => 'create_event', 'event_title' => $event->title]),
             ]);
 
             return response()->json([
@@ -206,9 +211,18 @@ class EventController extends Controller
                 }
             }
 
+            $statusLabel = match ($validated['status']) {
+                'going'      => 'is going to',
+                'interested' => 'is interested in',
+                'not_going'  => 'is not going to',
+                default      => 'RSVPed to',
+            };
             AdminLog::create([
-                'user_id' => $userId,
-                'action' => 'rsvp_event_' . $validated['status'],
+                'user_id'    => $userId,
+                'action'     => trim((Auth::user()->first_name ?? '') . ' ' . (Auth::user()->last_name ?? '')) . ' ' . $statusLabel . ' event "' . $event->title . '"',
+                'model_type' => 'Event',
+                'model_id'   => $event->id,
+                'details'    => json_encode(['action_type' => 'rsvp_event', 'rsvp_status' => $validated['status'], 'event_title' => $event->title]),
             ]);
 
             $attendeesCount = EventRsvp::where('event_id', $event->id)
@@ -253,8 +267,12 @@ class EventController extends Controller
             $event->save();
 
             AdminLog::create([
-                'user_id' => $user->id,
-                'action' => $event->is_featured ? 'feature_event' : 'unfeature_event',
+                'user_id'    => $user->id,
+                'action'     => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) . ($event->is_featured ? ' featured' : ' unfeatured') . ' event "' . $event->title . '"',
+                'model_type' => 'Event',
+                'model_id'   => $event->id,
+                'ip_address' => request()->ip(),
+                'details'    => json_encode(['action_type' => $event->is_featured ? 'feature_event' : 'unfeature_event', 'event_title' => $event->title]),
             ]);
 
             return response()->json([
@@ -390,8 +408,10 @@ class EventController extends Controller
         if (!Schema::hasTable('admin_logs')) {
             return;
         }
-        $adminName = $admin ? trim(($admin->full_name ?? trim(($admin->first_name ?? '') . ' ' . ($admin->last_name ?? '')))) : '';
-        $logMessage = ($adminName !== '' ? 'Admin ' . $adminName : 'Admin') . ' performed ' . $actionLabel . ' on ' . $entityId . ' directly from the feed';
+        $adminName = $admin ? trim(($admin->full_name ?? trim(($admin->first_name ?? '') . ' ' . ($admin->last_name ?? '')))) : 'Admin';
+        $resourceTitle = $details['event_title'] ?? $details['title'] ?? null;
+        $resourceLabel = $resourceTitle ? '"' . $resourceTitle . '"' : 'resource #' . $entityId;
+        $logMessage = trim($adminName) . ' performed ' . $actionLabel . ' on ' . strtolower($modelType) . ' ' . $resourceLabel;
         $logPayload = [];
         if (Schema::hasColumn('admin_logs', 'user_id')) $logPayload['user_id'] = Auth::id();
         if (Schema::hasColumn('admin_logs', 'action')) $logPayload['action'] = $logMessage;

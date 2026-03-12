@@ -299,35 +299,74 @@
 
         <!-- Recent Activity / Logs (Admin Only) -->
         <div v-if="isAdmin" class="bg-white rounded-lg shadow-md p-6">
-          <h3 class="text-lg font-semibold text-gray-900 mb-4">Logs</h3>
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-gray-900">Activity Logs</h3>
+            <span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Last 30 days</span>
+          </div>
+
           <div v-if="adminLogs.length > 0" class="space-y-3">
-            <div v-for="(log, index) in paginatedLogs" :key="index" class="text-sm border-b border-gray-100 pb-2">
-              <p class="text-gray-700">{{ log.description }}</p>
-              <p class="text-gray-500 text-xs mt-1">{{ formatActivityTime(log.created_at) }}</p>
+            <div
+              v-for="(log, index) in paginatedLogs"
+              :key="index"
+              class="flex gap-3 py-3 border-b border-gray-100 last:border-0"
+            >
+              <!-- Icon -->
+              <div :class="['w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm', getLogIconBg(log)]">
+                {{ getLogIcon(log) }}
+              </div>
+
+              <!-- Content -->
+              <div class="flex-1 min-w-0">
+                <!-- Action sentence -->
+                <p class="text-sm text-gray-800 leading-snug">{{ log.action }}</p>
+
+                <!-- Actor + Target -->
+                <div class="flex flex-wrap items-center gap-1 mt-1">
+                  <span class="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                    👤 {{ log.actor_name || 'Unknown' }}
+                  </span>
+                  <span v-if="log.target_user && log.target_user.name" class="inline-flex items-center gap-1 text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">
+                    🎯 {{ log.target_user.name }}
+                  </span>
+                </div>
+
+                <!-- Meta: time + IP -->
+                <p class="text-xs text-gray-400 mt-1">
+                  {{ formatActivityTime(log.created_at) }}
+                  <span v-if="log.ip_address" class="ml-1">· {{ log.ip_address }}</span>
+                </p>
+
+                <!-- Details chips -->
+                <div v-if="log.details && log.details.changed_fields && log.details.changed_fields.length > 0" class="flex flex-wrap gap-1 mt-1.5">
+                  <span
+                    v-for="field in log.details.changed_fields.slice(0, 4)"
+                    :key="field"
+                    class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded"
+                  >{{ field }}</span>
+                  <span v-if="log.details.changed_fields.length > 4" class="text-xs text-gray-400">+{{ log.details.changed_fields.length - 4 }} more</span>
+                </div>
+              </div>
             </div>
-            
-            <!-- Pagination for Logs -->
-            <div v-if="totalLogPages > 1" class="flex items-center justify-center gap-2 mt-4 pt-4 border-t">
-              <button 
+
+            <!-- Pagination -->
+            <div v-if="totalLogPages > 1" class="flex items-center justify-center gap-2 mt-4 pt-3 border-t">
+              <button
                 @click="goToLogPage(currentLogPage - 1)"
                 :disabled="currentLogPage === 1"
                 class="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                &lt;
-              </button>
-              <span class="text-sm text-gray-600">Page {{ currentLogPage }} of {{ totalLogPages }}</span>
-              <button 
+              >&lt;</button>
+              <span class="text-sm text-gray-600">{{ currentLogPage }} / {{ totalLogPages }}</span>
+              <button
                 @click="goToLogPage(currentLogPage + 1)"
                 :disabled="currentLogPage === totalLogPages"
                 class="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                &gt;
-              </button>
+              >&gt;</button>
             </div>
           </div>
-          <div v-else class="text-center py-4">
+
+          <div v-else class="text-center py-6">
+            <p class="text-3xl mb-2">📋</p>
             <p class="text-sm text-gray-500">No activity logs in the last 30 days</p>
-          </div>
           </div>
         </div>
       </div>
@@ -483,9 +522,9 @@
                     <span v-if="selectedAlumni.is_verified" class="bg-yellow-100 text-yellow-800 text-sm px-3 py-1 rounded-full">🏅 Verified Alumni</span>
                   <span v-if="selectedAlumni.lcba_verification_status === 'verified' || selectedAlumni.is_lcba_employee_faculty" class="bg-green-100 text-green-800 text-sm px-3 py-1 rounded-full">🏢 LCBA Employee</span>
                   </div>
-          </div>
-        </div>
-      </div>
+                </div>
+              </div>
+            </div>
 
             <!-- Experience Tab -->
             <div v-if="activeProfileTab === 'experience'">
@@ -543,6 +582,7 @@
                 <p class="text-sm">No work experience information available</p>
               </div>
             </div>
+          </div>
 
           <!-- Action Buttons -->
           <div class="flex justify-end space-x-4">
@@ -990,6 +1030,39 @@ const formatPostDate = (dateStr) => {
   if (hours < 24) return `${hours}h ago`
   if (days < 7) return `${days}d ago`
   return date.toLocaleDateString()
+}
+
+const getLogIcon = (log) => {
+  const type = log?.details?.action_type || log?.action || ''
+  if (type.includes('login')) return '🔐'
+  if (type.includes('logout')) return '🚪'
+  if (type.includes('password') || type.includes('reset_password')) return '🔑'
+  if (type.includes('profile_update') || type.includes('updated their profile')) return '✏️'
+  if (type.includes('approve')) return '✅'
+  if (type.includes('reject')) return '❌'
+  if (type.includes('activate')) return '▶️'
+  if (type.includes('deactivate')) return '⏸️'
+  if (type.includes('create_event') || type.includes('event')) return '📅'
+  if (type.includes('create_job') || type.includes('job')) return '💼'
+  if (type.includes('import_alumni') || type.includes('csv')) return '📥'
+  if (type.includes('verify') || type.includes('badge')) return '🏅'
+  if (type.includes('role') || type.includes('admin')) return '🛡️'
+  if (type.includes('rsvp')) return '📨'
+  if (type.includes('remove') || type.includes('delete')) return '🗑️'
+  return '📋'
+}
+
+const getLogIconBg = (log) => {
+  const type = log?.details?.action_type || log?.action || ''
+  if (type.includes('login') || type.includes('password') || type.includes('reset')) return 'bg-yellow-100'
+  if (type.includes('approve') || type.includes('activate') || type.includes('verify')) return 'bg-green-100'
+  if (type.includes('reject') || type.includes('deactivate') || type.includes('remove') || type.includes('delete')) return 'bg-red-100'
+  if (type.includes('profile_update') || type.includes('updated their profile')) return 'bg-blue-100'
+  if (type.includes('event') || type.includes('rsvp')) return 'bg-indigo-100'
+  if (type.includes('job')) return 'bg-orange-100'
+  if (type.includes('import') || type.includes('csv')) return 'bg-teal-100'
+  if (type.includes('role') || type.includes('admin')) return 'bg-purple-100'
+  return 'bg-gray-100'
 }
 
 onMounted(() => {

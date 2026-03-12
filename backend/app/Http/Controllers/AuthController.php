@@ -409,6 +409,45 @@ class AuthController extends Controller
             $user->saveQuietly();
         }
 
+        // Audit log — record who updated their profile
+        try {
+            $freshUser = $user->fresh();
+            $actorName = trim(($freshUser->first_name ?? '') . ' ' . ($freshUser->last_name ?? ''));
+            if ($actorName === '') {
+                $actorName = $freshUser->email ?? 'Unknown user';
+            }
+            $changedKeys = array_keys(array_diff_assoc(
+                $request->only([
+                    'first_name','middle_name','last_name','suffix','headline','bio',
+                    'current_job_title','industry','city','municipality','country',
+                    'employment_status','employment_sector','skills','work_setup_preferences',
+                    'employment_type_preferences','industries_of_interest','program','batch',
+                    'highest_educational_attainment','linkedin_url','portfolio_url',
+                ]),
+                array_intersect_key($freshUser->toArray(), array_flip([
+                    'first_name','middle_name','last_name','suffix','headline','bio',
+                    'current_job_title','industry','city','municipality','country',
+                    'employment_status','employment_sector','skills','work_setup_preferences',
+                    'employment_type_preferences','industries_of_interest','program','batch',
+                    'highest_educational_attainment','linkedin_url','portfolio_url',
+                ]))
+            ));
+            AdminLog::create([
+                'user_id'    => $freshUser->id,
+                'action'     => $actorName . ' updated their profile',
+                'model_type' => 'User',
+                'model_id'   => $freshUser->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode([
+                    'changed_fields' => $changedKeys,
+                    'action_type'    => 'self_profile_update',
+                ]),
+            ]);
+        } catch (\Throwable $e) {
+            // Non-critical, don't block the response
+        }
+
         return response()->json([
             'message' => 'Profile updated successfully',
             'user' => $user->fresh()
@@ -433,6 +472,19 @@ class AuthController extends Controller
         $user->update([
             'password' => Hash::make($validated['password'])
         ]);
+
+        // Audit log — password change
+        try {
+            AdminLog::create([
+                'user_id'    => $user->id,
+                'action'     => trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) . ' changed their password',
+                'model_type' => 'User',
+                'model_id'   => $user->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode(['action_type' => 'self_password_change']),
+            ]);
+        } catch (\Throwable $e) {}
 
         return response()->json([
             'message' => 'Password changed successfully'

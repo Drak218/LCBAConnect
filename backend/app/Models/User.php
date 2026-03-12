@@ -77,7 +77,7 @@ class User extends Authenticatable
     {
         return [
             'password' => 'hashed',
-            'birthdate' => 'date',
+            'birthdate' => 'encrypted',
             'first_login_at' => 'datetime',
             'guidelines_accepted_at' => 'datetime',
             'years_of_experience' => 'integer',
@@ -89,6 +89,8 @@ class User extends Authenticatable
             'privacy_settings' => 'array',
             'is_verified' => 'boolean',
             'is_active' => 'boolean',
+            'phone_number' => 'encrypted',
+            'salary_range' => 'encrypted',
         ];
     }
 

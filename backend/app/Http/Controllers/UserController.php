@@ -139,7 +139,19 @@ class UserController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $users
+                'data' => $users->filter(function ($user) {
+                    // Gracefully skip any user that throws a decryption error
+                    try {
+                        // Access encrypted fields to trigger decryption — if invalid, skip
+                        if ($user instanceof \App\Models\User) {
+                            $_ = $user->phone_number;
+                            $_ = $user->salary_range;
+                        }
+                        return true;
+                    } catch (\Throwable $e) {
+                        return false;
+                    }
+                })->values()
             ]);
         } catch (\Exception $e) {
             if (!($request->has('role') && $request->role && $request->role !== 'alumni') && Schema::hasTable('alumni')) {
@@ -439,15 +451,42 @@ class UserController extends Controller
             }
 
             $logs = $query->limit($limit)->get()->map(function ($log) {
-                $userName = $log->user ? trim(($log->user->first_name ?? '') . ' ' . ($log->user->last_name ?? '')) : 'Admin';
-                $action = $log->action ?? 'activity';
+                $actor = $log->user;
+                $actorName = $actor
+                    ? trim(($actor->first_name ?? '') . ' ' . ($actor->last_name ?? '')) . ' (' . ($actor->role ?? 'user') . ')'
+                    : 'Unknown';
+
+                $targetUser = null;
+                if ($log->model_type === 'User' && $log->model_id && $log->model_id !== $log->user_id) {
+                    $target = \App\Models\User::find($log->model_id);
+                    if ($target) {
+                        $targetUser = [
+                            'id'    => $target->id,
+                            'name'  => trim(($target->first_name ?? '') . ' ' . ($target->last_name ?? '')),
+                            'email' => $target->email,
+                            'role'  => $target->role,
+                        ];
+                    }
+                }
+
+                $details = null;
+                if ($log->details) {
+                    $details = json_decode($log->details, true);
+                }
 
                 return [
-                    'id' => $log->log_id ?? $log->id,
-                    'action' => $action,
-                    'description' => $userName . ' performed ' . $action,
-                    'user_id' => $log->user_id,
-                    'created_at' => $log->created_at,
+                    'id'          => $log->log_id ?? $log->id,
+                    'action'      => $log->action ?? 'activity',
+                    'description' => $log->action ?? 'activity',
+                    'actor_id'    => $log->user_id,
+                    'actor_name'  => $actorName,
+                    'target_user' => $targetUser,
+                    'model_type'  => $log->model_type,
+                    'model_id'    => $log->model_id,
+                    'ip_address'  => $log->ip_address,
+                    'user_agent'  => $log->user_agent,
+                    'details'     => $details,
+                    'created_at'  => $log->created_at,
                 ];
             });
 
@@ -502,10 +541,25 @@ class UserController extends Controller
                 Log::error('Failed to send approval email: ' . $e->getMessage());
             }
 
+            $adminName = $authUser->full_name ?? trim(($authUser->first_name ?? '') . ' ' . ($authUser->last_name ?? ''));
+            $targetName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+            AdminLog::create([
+                'user_id'    => $authUser->id,
+                'action'     => trim($adminName) . ' approved user #' . $user->id . ' (' . $targetName . ')',
+                'model_type' => 'User',
+                'model_id'   => $user->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode([
+                    'action_type'  => 'admin_approve_user',
+                    'target_email' => $user->email,
+                ]),
+            ]);
+
             return response()->json([
                 'success' => true,
                 'message' => 'User approved successfully.',
-                'user' => $user
+                'user'    => $user
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -549,6 +603,22 @@ class UserController extends Controller
             }
 
             $user->delete();
+
+            $adminName = $authUser->full_name ?? trim(($authUser->first_name ?? '') . ' ' . ($authUser->last_name ?? ''));
+            $targetName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+            AdminLog::create([
+                'user_id'    => $authUser->id,
+                'action'     => trim($adminName) . ' rejected & removed user ' . $targetName . ' (' . $user->email . ')',
+                'model_type' => 'User',
+                'model_id'   => $user->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode([
+                    'action_type'  => 'admin_reject_user',
+                    'reason'       => $reason,
+                    'target_email' => $user->email,
+                ]),
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -598,12 +668,16 @@ class UserController extends Controller
                 }
 
                 $adminName = Auth::user()->full_name ?? trim((Auth::user()->first_name ?? '') . ' ' . (Auth::user()->last_name ?? ''));
+                $targetName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
                 AdminLog::create([
-                    'user_id' => Auth::id(),
-                    'action' => trim($adminName) . ' marked employee/faculty badge as unverified for user #' . $user->id,
+                    'user_id'    => Auth::id(),
+                    'action'     => trim($adminName) . ' revoked employee/faculty badge from ' . $targetName . ' (' . $user->email . ')',
                     'model_type' => 'User',
-                    'model_id' => $user->id,
-                    'details' => json_encode([
+                    'model_id'   => $user->id,
+                    'ip_address' => $request->ip(),
+                    'user_agent' => (string) $request->userAgent(),
+                    'details'    => json_encode([
+                        'action_type'              => 'revoke_employee_badge',
                         'is_lcba_employee_faculty' => $user->is_lcba_employee_faculty,
                         'lcba_verification_status' => $user->lcba_verification_status
                     ]),
@@ -629,12 +703,16 @@ class UserController extends Controller
             }
 
             $adminName = Auth::user()->full_name ?? trim((Auth::user()->first_name ?? '') . ' ' . (Auth::user()->last_name ?? ''));
+            $targetName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
             AdminLog::create([
-                'user_id' => Auth::id(),
-                'action' => trim($adminName) . ' marked employee/faculty badge as verified for user #' . $user->id,
+                'user_id'    => Auth::id(),
+                'action'     => trim($adminName) . ' verified employee/faculty badge for ' . $targetName . ' (' . $user->email . ')',
                 'model_type' => 'User',
-                'model_id' => $user->id,
-                'details' => json_encode([
+                'model_id'   => $user->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode([
+                    'action_type'              => 'verify_employee_badge',
                     'is_lcba_employee_faculty' => $user->is_lcba_employee_faculty,
                     'lcba_verification_status' => $user->lcba_verification_status
                 ]),
@@ -697,16 +775,19 @@ class UserController extends Controller
             }
 
             $adminName = Auth::user()->full_name ?? trim((Auth::user()->first_name ?? '') . ' ' . (Auth::user()->last_name ?? ''));
+            $targetName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
             AdminLog::create([
-                'user_id' => Auth::id(),
-                'action' => trim($adminName) . ' marked employee/faculty badge as unverified for user #' . $user->id,
+                'user_id'    => Auth::id(),
+                'action'     => trim($adminName) . ' rejected employee ID verification for ' . $targetName . ' (' . $user->email . ')',
                 'model_type' => 'User',
-                'model_id' => $user->id,
-                'details' => json_encode([
+                'model_id'   => $user->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode([
+                    'action_type'              => 'reject_employee_verification',
                     'is_lcba_employee_faculty' => $user->is_lcba_employee_faculty,
                     'lcba_verification_status' => $user->lcba_verification_status,
-                    'reason' => $request->input('reason'),
-                    'notification_message' => $notificationMessage
+                    'reason'                   => $request->input('reason'),
                 ]),
             ]);
 
@@ -817,15 +898,19 @@ class UserController extends Controller
             }
 
             $adminName = $authUser->full_name ?? trim(($authUser->first_name ?? '') . ' ' . ($authUser->last_name ?? ''));
+            $targetName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
             $actionLabel = $isActive ? 'activated' : 'deactivated';
             AdminLog::create([
-                'user_id' => $authUser->id,
-                'action' => trim($adminName) . ' ' . $actionLabel . ' user #' . $user->id,
+                'user_id'    => $authUser->id,
+                'action'     => trim($adminName) . ' ' . $actionLabel . ' account of ' . $targetName . ' (' . $user->email . ')',
                 'model_type' => 'User',
-                'model_id' => $user->id,
-                'details' => json_encode([
-                    'is_active' => $user->is_active,
-                    'status' => $user->status
+                'model_id'   => $user->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode([
+                    'action_type' => 'update_user_status',
+                    'is_active'   => $user->is_active,
+                    'status'      => $user->status
                 ]),
             ]);
 
@@ -916,17 +1001,20 @@ class UserController extends Controller
             }
 
             $adminName = $authUser->full_name ?? trim(($authUser->first_name ?? '') . ' ' . ($authUser->last_name ?? ''));
+            $targetName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
             $actionLabel = $newRole === 'admin' ? 'granted admin privileges to' : 'removed admin privileges from';
             AdminLog::create([
-                'user_id' => $authUser->id,
-                'action' => trim($adminName) . ' ' . $actionLabel . ' user #' . $user->id,
+                'user_id'    => $authUser->id,
+                'action'     => trim($adminName) . ' ' . $actionLabel . ' ' . $targetName . ' (' . $user->email . ')',
                 'model_type' => 'User',
-                'model_id' => $user->id,
+                'model_id'   => $user->id,
                 'ip_address' => $request->ip(),
                 'user_agent' => (string) $request->userAgent(),
-                'details' => json_encode([
+                'details'    => json_encode([
+                    'action_type'   => 'update_user_role',
                     'previous_role' => $previousRole,
-                    'new_role' => $newRole
+                    'new_role'      => $newRole,
+                    'target_email'  => $user->email,
                 ]),
             ]);
 
@@ -1087,13 +1175,18 @@ class UserController extends Controller
 
             fclose($handle);
 
+            $adminName = $authUser->full_name ?? trim(($authUser->first_name ?? '') . ' ' . ($authUser->last_name ?? ''));
             AdminLog::create([
-                'user_id' => $authUser->id,
-                'action' => 'import_alumni_csv',
-                'details' => json_encode([
-                    'created' => $created,
-                    'updated' => $updated,
-                    'skipped' => $skipped
+                'user_id'    => $authUser->id,
+                'action'     => trim($adminName) . ' imported alumni CSV (' . $created . ' created, ' . $updated . ' updated, ' . $skipped . ' skipped)',
+                'model_type' => 'User',
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode([
+                    'action_type' => 'import_alumni_csv',
+                    'created'     => $created,
+                    'updated'     => $updated,
+                    'skipped'     => $skipped
                 ])
             ]);
 
@@ -1163,13 +1256,18 @@ class UserController extends Controller
             }
 
             $adminName = $authUser->full_name ?? trim(($authUser->first_name ?? '') . ' ' . ($authUser->last_name ?? ''));
+            $targetName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
             AdminLog::create([
-                'user_id' => $authUser->id,
-                'action' => trim($adminName) . ' reset password for user #' . $user->id,
+                'user_id'    => $authUser->id,
+                'action'     => trim($adminName) . ' reset password for ' . $targetName . ' (' . $user->email . ')' . ($mode === 'email' ? ' via email link' : ' with temporary password'),
                 'model_type' => 'User',
-                'model_id' => $user->id,
-                'details' => json_encode([
-                    'mode' => $mode
+                'model_id'   => $user->id,
+                'ip_address' => $request->ip(),
+                'user_agent' => (string) $request->userAgent(),
+                'details'    => json_encode([
+                    'action_type'  => 'admin_reset_password',
+                    'mode'         => $mode,
+                    'target_email' => $user->email,
                 ]),
             ]);
 
