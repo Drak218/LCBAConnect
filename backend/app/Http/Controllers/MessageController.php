@@ -60,6 +60,7 @@ class MessageController extends Controller
                 'data' => $conversations
             ]);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Messages API Index Error: ' . $e->getMessage(), ['exception' => $e]);
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
@@ -129,6 +130,7 @@ class MessageController extends Controller
                 'message' => 'Message sent successfully'
             ]);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Messages API Error: ' . $e->getMessage(), ['exception' => $e]);
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
@@ -167,6 +169,7 @@ class MessageController extends Controller
                 'data' => $users
             ]);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Messages API Error: ' . $e->getMessage(), ['exception' => $e]);
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
@@ -216,6 +219,7 @@ class MessageController extends Controller
                 'data' => $messages
             ]);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Messages API Error: ' . $e->getMessage(), ['exception' => $e]);
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
@@ -240,6 +244,7 @@ class MessageController extends Controller
                 'data' => ['unread_count' => $unreadCount]
             ]);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Messages API Error: ' . $e->getMessage(), ['exception' => $e]);
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage()
