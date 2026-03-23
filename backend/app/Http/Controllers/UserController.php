@@ -520,8 +520,10 @@ class UserController extends Controller
     public function approveUser(Request $request, $id): JsonResponse
     {
         try {
+            $authUser = Auth::user();
+            
             // Check if user is admin
-            if (Auth::user()->role !== 'admin') {
+            if (!$authUser || $authUser->role !== 'admin') {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthorized. Admin access required.'
@@ -1060,10 +1062,20 @@ class UserController extends Controller
 
         try {
             $validated = $request->validate([
-                'file' => 'required|file|mimes:csv,txt'
+                'file' => 'required|file'
             ]);
 
             $file = $validated['file'];
+
+            // Validate file extension manually (avoids requiring php_fileinfo for MIME detection)
+            $extension = strtolower($file->getClientOriginalExtension());
+            if (!in_array($extension, ['csv', 'txt'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid file type. Please upload a .csv file.'
+                ], 422);
+            }
+
             $handle = fopen($file->getRealPath(), 'r');
             if (!$handle) {
                 return response()->json([
@@ -1082,7 +1094,7 @@ class UserController extends Controller
             }
 
             $normalizedHeaders = array_map(fn ($h) => strtolower(trim($h ?? '')), $headers);
-            $required = ['email', 'first_name', 'last_name'];
+            $required = ['email', 'first_name', 'last_name', 'program', 'batch', 'highest_educational_attainment'];
             foreach ($required as $req) {
                 if (!in_array($req, $normalizedHeaders, true)) {
                     fclose($handle);
@@ -1105,6 +1117,7 @@ class UserController extends Controller
             $hasHeadline = Schema::hasColumn('users', 'headline');
             $hasIndustry = Schema::hasColumn('users', 'industry');
             $hasExperience = Schema::hasColumn('users', 'experience_level');
+            $hasHighestEd = Schema::hasColumn('users', 'highest_educational_attainment');
             $hasRole = Schema::hasColumn('users', 'role');
 
             while (($row = fgetcsv($handle)) !== false) {
@@ -1122,9 +1135,39 @@ class UserController extends Controller
 
                 $firstName = $data['first_name'] ?? '';
                 $lastName = $data['last_name'] ?? '';
+                $program = $data['program'] ?? '';
+                $batch = $data['batch'] ?? '';
+                $highestEd = $data['highest_educational_attainment'] ?? '';
 
                 if ($firstName === '' || $lastName === '') {
                     $skipped++;
+                    if (count($errors) < 5) {
+                        $errors[] = $email . ': first_name and last_name are required.';
+                    }
+                    continue;
+                }
+
+                if ($program === '') {
+                    $skipped++;
+                    if (count($errors) < 5) {
+                        $errors[] = $email . ': program is required.';
+                    }
+                    continue;
+                }
+
+                if ($batch === '') {
+                    $skipped++;
+                    if (count($errors) < 5) {
+                        $errors[] = $email . ': batch is required.';
+                    }
+                    continue;
+                }
+
+                if ($highestEd === '') {
+                    $skipped++;
+                    if (count($errors) < 5) {
+                        $errors[] = $email . ': highest_educational_attainment is required.';
+                    }
                     continue;
                 }
 
@@ -1142,11 +1185,14 @@ class UserController extends Controller
                 if ($hasRole) {
                     $payload['role'] = 'alumni';
                 }
-                if ($hasProgram && array_key_exists('program', $data)) {
-                    $payload['program'] = $data['program'];
+                if ($hasProgram) {
+                    $payload['program'] = $program;
                 }
-                if ($hasBatch && array_key_exists('batch', $data)) {
-                    $payload['batch'] = $data['batch'];
+                if ($hasBatch) {
+                    $payload['batch'] = $batch;
+                }
+                if ($hasHighestEd) {
+                    $payload['highest_educational_attainment'] = $highestEd;
                 }
                 if ($hasHeadline && array_key_exists('headline', $data)) {
                     $payload['headline'] = $data['headline'];
